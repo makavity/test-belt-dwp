@@ -9,3 +9,8 @@ edition = "2021"
 hex-literal = "0.4.1"
 ghash = "0.5.1"
 belt-block = "0.1.2"
+galois_field_2pm = "0.1.0"
+aead = "0.5.2"
+
+[target.'cfg(any(target_arch = "x86_64", target_arch = "x86"))'.dependencies]
+cpufeatures = "0.2"
