@@ -2,7 +2,7 @@ use std::ops::{Add, Mul};
 
 use aead::{consts::U16, generic_array::GenericArray};
 
-use super::{GfElement, utils::bmul64};
+use super::{utils::bmul64, GfElement};
 
 #[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Element(u64, u64);

@@ -1,6 +1,6 @@
 use aead::{
-    AeadCore,
-    AeadInPlace, consts::{U0, U16, U32, U8}, Key, KeyInit, KeySizeUser, Nonce, Tag,
+    consts::{U0, U16, U32, U8},
+    AeadCore, AeadInPlace, Key, KeyInit, KeySizeUser, Nonce, Tag,
 };
 use belt_block::{belt_block_raw, BeltBlock};
 use belt_ctr::BeltCtr;
@@ -64,7 +64,7 @@ impl AeadInPlace for BeltDwp {
             ghash.update_padded(block);
         });
 
-        let mut sizes_block: Block::<GHash> = Default::default();
+        let mut sizes_block: Block<GHash> = Default::default();
 
         sizes_block[..8].copy_from_slice(&plain_cnt.to_le_bytes());
         sizes_block[8..].copy_from_slice(&sec_cnt.to_le_bytes());
@@ -112,7 +112,7 @@ impl AeadInPlace for BeltDwp {
         //  4.2 𝑡 ← 𝑡 * 𝑟.
         ghash.update_padded(buffer);
 
-        let mut sizes_block: Block::<GHash> = Default::default();
+        let mut sizes_block: Block<GHash> = Default::default();
 
         sizes_block[..8].copy_from_slice(&plain_cnt.to_le_bytes());
         sizes_block[8..].copy_from_slice(&sec_cnt.to_le_bytes());
@@ -128,10 +128,10 @@ impl AeadInPlace for BeltDwp {
         if hmac[..8] != tag[..] {
             return Err(aead::Error);
         }
-        
+
         buffer.chunks_mut(16).for_each(|block| {
             cipher.apply_keystream(block);
-        }); 
+        });
 
         Ok(())
     }
@@ -139,9 +139,7 @@ impl AeadInPlace for BeltDwp {
 
 impl KeyInit for BeltDwp {
     fn new(key: &Key<Self>) -> Self {
-        Self {
-            key: *key,
-        }
+        Self { key: *key }
     }
 }
 
@@ -156,7 +154,7 @@ fn main() {
     let k = hex!("E9DEE72C 8F0C0FA6 2DDB49F4 6F739647 06075316 ED247A37 39CBA383 03A98BF6");
     let s = hex!("BE329713 43FC9A48 A02A885F 194B09A1");
     let _x = hex!("B194BAC8 0A08F53B 366D008E 584A5DE4");
-    
+
     let mut x = hex!("B194BAC8 0A08F53B 366D008E 584A5DE4");
 
     let y = hex!("52C9AF96 FF50F644 35FC43DE F56BD797");
@@ -164,10 +162,12 @@ fn main() {
 
     let beltdwp = BeltDwp::new_from_slice(&k).unwrap();
     let tag = beltdwp.encrypt_in_place_detached(&s.into(), &i, &mut x);
-    
+
     assert_eq!(t, *tag.unwrap());
     assert_eq!(y, x);
-    
-    beltdwp.decrypt_in_place_detached(&s.into(), &i, &mut x, &tag.unwrap()).unwrap();
+
+    beltdwp
+        .decrypt_in_place_detached(&s.into(), &i, &mut x, &tag.unwrap())
+        .unwrap();
     assert_eq!(x, _x);
 }

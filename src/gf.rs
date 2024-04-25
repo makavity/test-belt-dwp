@@ -22,11 +22,11 @@ pub trait GfElement {
 #[test]
 fn test_a18() {
     use crate::gf::gf128_soft64::Element;
-    use hex_literal::hex;
     use aead::consts::U16;
+    use hex_literal::hex;
 
     type Block = GenericArray<u8, U16>;
-    
+
     let test_vectors = [
         (
             hex!("34904055 11BE3297 1343724C 5AB793E9"),

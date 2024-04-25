@@ -13,7 +13,6 @@ pub(crate) fn to_u32<const N: usize>(src: &[u8]) -> [u32; N] {
     res
 }
 
-
 /// Helper function for transforming BelT keys and blocks from a array of `u32`s
 /// to a byte array.
 ///

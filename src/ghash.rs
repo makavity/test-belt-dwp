@@ -1,5 +1,5 @@
-use aead::{consts::U16, KeyInit, KeySizeUser};
 use aead::consts::U1;
+use aead::{consts::U16, KeyInit, KeySizeUser};
 use cipher::{BlockSizeUser, ParBlocksSizeUser};
 use universal_hash::{UhfBackend, UhfClosure, UniversalHash};
 
@@ -40,13 +40,15 @@ impl GHash {
             h: Element::from(h),
         }
     }
-    
+
     pub(crate) fn xor_s(&mut self, x: &Block) {
         self.s = self.s + Element::from(x);
     }
 }
 
-impl ParBlocksSizeUser for GHash { type ParBlocksSize = U1; }
+impl ParBlocksSizeUser for GHash {
+    type ParBlocksSize = U1;
+}
 
 impl UhfBackend for GHash {
     fn proc_block(&mut self, x: &Block) {
