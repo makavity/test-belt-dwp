@@ -1,117 +1,130 @@
-use ghash::Block;
+use aead::{
+    AeadCore,
+    AeadInPlace, consts::{U0, U16, U32, U8}, Key, KeyInit, KeySizeUser, Nonce, Tag,
+};
+use aead::generic_array::GenericArray;
+use belt_block::{belt_block_raw, BeltBlock};
+use belt_ctr::BeltCtr;
+use cipher::{Block, Iv, KeyIvInit, StreamCipher};
 use hex_literal::hex;
+use universal_hash::UniversalHash;
 
-use crate::gf::gf128_soft64::Element;
-use crate::gf::GfElement;
+use crate::{
+    ghash::GHash,
+    utils::{from_u32, to_u32},
+};
 
 mod gf;
+mod ghash;
+mod utils;
 
 const T: u128 = 0xB194BAC80A08F53B366D008E584A5DE4;
 
-/// Helper function for transforming BelT keys and blocks from a byte array
-/// to an array of `u32`s.
-///
-/// # Panics
-/// If length of `src` is not equal to `4 * N`.
-// #[inline(always)]
-pub(crate) fn to_u32<const N: usize>(src: &[u8]) -> [u32; N] {
-    assert_eq!(src.len(), 4 * N);
-    let mut res = [0u32; N];
-    res.iter_mut()
-        .zip(src.chunks_exact(4))
-        .for_each(|(dst, src)| *dst = u32::from_le_bytes(src.try_into().unwrap()));
-    res
+pub struct BeltDwp {
+    key: Key<BeltBlock>,
+    plain_cnt: u128,
+    sec_cnt: u128,
 }
 
-
-/// Helper function for transforming BelT keys and blocks from a array of `u32`s
-/// to a byte array.
-///
-/// # Panics
-/// If length of `src` is not equal to `4 * N`.
-// #[inline(always)]
-pub(crate) fn from_u32<const N: usize>(src: &[u32]) -> [u8; N] {
-    assert_eq!(N, 4 * src.len());
-    let mut res = [0u8; N];
-    src.iter()
-        .zip(res.chunks_exact_mut(4))
-        .for_each(|(src, dst)| dst.copy_from_slice(&src.to_le_bytes()));
-    res
+impl KeySizeUser for BeltDwp {
+    type KeySize = U32;
 }
 
+impl AeadInPlace for BeltDwp {
+    fn encrypt_in_place_detached(
+        &self,
+        nonce: &Nonce<Self>,
+        associated_data: &[u8],
+        buffer: &mut [u8],
+    ) -> aead::Result<Tag<Self>> {
+        let plain_cnt = associated_data.len() as u64 * 8;
+        let sec_cnt = buffer.len() as u64 * 8;
+
+        let _s = to_u32::<4>(nonce);
+        let _k = to_u32::<8>(&self.key);
+        // 2.1. 𝑠 ← belt-block(𝑆, 𝐾);
+        let s = belt_block_raw(_s, &_k);
+        // 2.2. 𝑟 ← belt-block(𝑠, 𝐾);
+        let r = from_u32::<16>(&belt_block_raw(s, &_k));
+        // r.reverse();
+
+        let iv = Iv::<BeltCtr>::from_slice(nonce);
+        let mut cipher: BeltCtr = BeltCtr::new(&self.key, iv);
+
+        let mut ghash = GHash::new_with_init_block(Key::<GHash>::from_slice(&r), T.swap_bytes());
+
+        // 3. For 𝑖 = 1, 2, . . . , 𝑚 do:
+        //  3.1 𝑡 ← 𝑡 ⊕ (𝐼𝑖 ‖ 0^{128−|𝐼𝑖|})
+        //  3.2 𝑡 ← 𝑡 * 𝑟.
+        ghash.update_padded(associated_data);
+
+        // 4. For 𝑖 = 1, 2, . . . , 𝑛 do:
+        //  4.1 𝑠 ← 𝑠 ⊞ ⟨1⟩_128
+        //  4.2 𝑌𝑖 ← 𝑋𝑖 ⊕ Lo(belt-block(𝑠, 𝐾), |𝑋𝑖|)
+        //  4.3 𝑡 ← 𝑡 ⊕ (𝑌𝑖 ‖ 0^{128−|𝑌𝑖|})
+        //  4.4 𝑡 ← 𝑡 * 𝑟.
+        buffer.chunks_mut(16).for_each(|block| {
+            cipher.apply_keystream(block);
+            ghash.update_padded(block);
+        });
+
+        let mut sizes_block: Block::<GHash> = Default::default();
+
+        sizes_block[..8].copy_from_slice(&plain_cnt.to_le_bytes());
+        sizes_block[8..].copy_from_slice(&sec_cnt.to_le_bytes());
+        
+        // 5. 𝑡 ← 𝑡 ⊕ (⟨|𝐼|⟩_64 ‖ ⟨|𝑋|⟩_64)
+        ghash.xor_s(&sizes_block);
+        
+        // 6. 𝑡 ← belt-block(𝑡 * 𝑟, 𝐾).
+        let tag = ghash.finalize();
+        
+        let hmac = from_u32::<16>(&belt_block_raw(to_u32::<4>(&tag), &_k));
+        
+        Ok(*Tag::<BeltDwp>::from_slice(&hmac[..8]))
+    }
+
+    fn decrypt_in_place_detached(
+        &self,
+        nonce: &Nonce<Self>,
+        associated_data: &[u8],
+        buffer: &mut [u8],
+        tag: &Tag<Self>,
+    ) -> aead::Result<()> {
+        todo!()
+    }
+}
+
+impl KeyInit for BeltDwp {
+    fn new(key: &Key<Self>) -> Self {
+        Self {
+            key: *key,
+            plain_cnt: 0,
+            sec_cnt: 0,
+        }
+    }
+}
+
+impl AeadCore for BeltDwp {
+    type NonceSize = U16;
+    type TagSize = U8;
+    type CiphertextOverhead = U0;
+}
 
 fn main() {
-    let mut u = hex!("34904055 11BE3297 1343724C 5AB793E9");
-    // u.reverse();
-    let mut v = hex!("22481783 8761A9D6 E3EC9689 110FB0F3");
-    // v.reverse();
-    
-    let block_u = Block::from(u);
-    // println!("{:02X?}", block_u);
-    let block_v = Block::from(v);
-    // println!("{:02X?}", block_v);
-    
-    let mut elem = Element::new();
-    elem.mul_sum(&block_u, &block_v);
-    
-    println!("{:02X?}", elem.into_bytes());
-    
-    // a1: E993B75A4C724313
-    // a0: 9732BE1155409034
-    // b1: F3B00F118996ECE3
-    // b0: D6A9618783174822
+    let mut i = hex!("8504FA9D1BB6C7AC252E72C202FDCE0D 5BE3D612 17B96181 FE6786AD 716B890B");
+    let k = hex!("E9DEE72C 8F0C0FA6 2DDB49F4 6F739647 06075316 ED247A37 39CBA383 03A98BF6");
+    let s = hex!("BE329713 43FC9A48 A02A885F 194B09A1");
+    let mut x = hex!("B194BAC8 0A08F53B 366D008E 584A5DE4");
 
-    // let mut ghash = GHash::new(&Key::<GHash>::from(v));
-    // ghash.update_padded(&u);
-    // let r = ghash.finalize();
-    // println!("{:02X?}", r);
-    // 
-    // // let mut c = hex!("0001D107 FC67DE40 04DC2C80 3DFD95C3");
-    // 
-    // // let mut i = hex!("8504FA9D 1BB6C7AC 252E72C2 02FDCE0D 5BE3D612 17B96181 FE6786AD 716B890B");
-    // // i[..16].iter_mut().zip(T.to_be_bytes().iter()).for_each(|(i, j)| {
-    // //     *i ^= j;
-    // // });
-    // // println!("{:02X?}", i);
-    // // i.chunks_mut(16).for_each(|chunk| {
-    // //     chunk.reverse();
-    // // });
-    // //
-    // // let k = hex!("E9DEE72C 8F0C0FA6 2DDB49F4 6F739647 06075316 ED247A37 39CBA383 03A98BF6");
-    // // let s = hex!("BE329713 43FC9A48 A02A885F 194B09A1");
-    // // let mut x = hex!("B194BAC8 0A08F53B 366D008E 584A5DE4");
-    // //
-    // // let y = hex!("52C9AF96 FF50F644 35FC43DE F56BD797");
-    // // let t = hex!("3B2E0AEB 2B91854B");
-    // //
-    // //
-    // // // Выполняем шаги алгоритма belt-dwp вплоть до 4
-    // // let _s = to_u32::<4>(&s);
-    // // let _k = to_u32::<8>(&k);
-    // // // 2.1. 𝑠 ← belt-block(𝑆, 𝐾);
-    // // let s = belt_block_raw(_s, &_k);
-    // // // 2.2. 𝑟 ← belt-block(𝑠, 𝐾);
-    // // let r = belt_block_raw(s, &_k);
-    // // let mut r = from_u32::<16>(&r);
-    // // // r.reverse();
-    // // let ghash_key = Key::<GHash>::from(r);
-    // // println!("ghash key: {:02X?}", ghash_key);
-    // //
-    // // let mut ghash = GHash::new(&ghash_key);
-    // //
-    // // ghash.update_padded(&i);
-    // //
-    // // // Если смотреть по результатам шагов выполнения, то вот что получается (soft64.rs)
-    // // // ghash_key: [22, 48, 17, 83, 87, 61, A9, D6, E3, EC, 96, 89, 11, 0F, B0, F3]
-    // // // s ^ x: U64x2(9732BE1155409034, E993B75A4C724313)
-    // // // (s ^ x) * h: U64x2(C0B4513066C11059, 25CB56B7D6A0EB8)
-    // // //
-    // // // s ^ x: U64x2(41D5E8277417F302, 9D5DE1AD0EC6946)
-    // // // (s ^ x) * h: U64x2(58FD16E630E85DCA, 186890A9D02C7B51)
-    // // //
-    // // // [18, 68, 90, A9, D0, 2C, 7B, 51, 58, FD, 16, E6, 30, E8, 5D, CA]
-    // // // Также прикладываю результат в SageMath, который тоже не похож на проверочный пример.
-    // // println!("tag: {:02X?}", ghash.finalize());
-    // //
-    // // type GF = galois_field_2pm::gf2::GFu128<0xB>;
+    let y = hex!("52C9AF96 FF50F644 35FC43DE F56BD797");
+    let t = hex!("3B2E0AEB 2B91854B");
+
+    let beltdwp = BeltDwp::new_from_slice(&k).unwrap();
+    let tt = beltdwp.encrypt_in_place_detached(&s.into(), &i, &mut x);
+    
+    println!("x: {:02X?}", x);
+    println!("y: {:02X?}", tt);
+    assert_eq!(&x, &y);
+    assert_eq!(*tt.unwrap(), t);
 }

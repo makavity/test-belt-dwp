@@ -1,7 +1,10 @@
+use std::ops::{Add, Mul};
+
 use aead::{consts::U16, generic_array::GenericArray};
 
 use super::{GfElement, utils::bmul64};
 
+#[derive(Copy, Clone, Debug, Default, Eq, PartialEq)]
 pub struct Element(u64, u64);
 
 type Block = GenericArray<u8, U16>;
@@ -26,7 +29,11 @@ impl GfElement for Element {
     fn mul_sum(&mut self, a: &Block, b: &Block) {
         let [a1, a0] = from_block(a);
         let [b1, b0] = from_block(b);
-        
+        // println!("a1: {:02X?}", a1);
+        // println!("a0: {:02X?}", a0);
+        // println!("b1: {:02X?}", b1);
+        // println!("b0: {:02X?}", b0);
+
         let a2 = a1 ^ a0;
         let b2 = b1 ^ b0;
 
@@ -47,6 +54,32 @@ impl GfElement for Element {
     }
 }
 
+impl From<u128> for Element {
+    fn from(x: u128) -> Self {
+        Self((x >> 64) as u64, x as u64)
+    }
+}
+
+impl From<Block> for Element {
+    fn from(block: Block) -> Self {
+        let [a, b] = from_block(&block);
+        Self(a, b)
+    }
+}
+
+impl From<Element> for Block {
+    fn from(element: Element) -> Self {
+        element.into_bytes()
+    }
+}
+
+impl From<&Block> for Element {
+    fn from(block: &Block) -> Self {
+        let [a, b] = from_block(block);
+        Self(a, b)
+    }
+}
+
 #[inline(always)]
 fn from_block(block: &Block) -> [u64; 2] {
     let (a, b) = block.split_at(8);
@@ -54,4 +87,22 @@ fn from_block(block: &Block) -> [u64; 2] {
         u64::from_le_bytes(b.try_into().unwrap()),
         u64::from_le_bytes(a.try_into().unwrap()),
     ]
+}
+
+impl Add for Element {
+    type Output = Self;
+
+    fn add(self, rhs: Self) -> Self {
+        Self(self.0 ^ rhs.0, self.1 ^ rhs.1)
+    }
+}
+
+impl Mul for Element {
+    type Output = Self;
+
+    fn mul(self, rhs: Self) -> Self {
+        let mut res = Self::new();
+        res.mul_sum(&self.into_bytes(), &rhs.into_bytes());
+        res
+    }
 }
