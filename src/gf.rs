@@ -1,4 +1,3 @@
-use aead::consts::U16;
 use aead::generic_array::{ArrayLength, GenericArray};
 
 mod utils;
@@ -24,6 +23,7 @@ pub trait GfElement {
 fn test_a18() {
     use crate::gf::gf128_soft64::Element;
     use hex_literal::hex;
+    use aead::consts::U16;
 
     type Block = GenericArray<u8, U16>;
     

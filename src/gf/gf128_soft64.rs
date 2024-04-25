@@ -29,10 +29,6 @@ impl GfElement for Element {
     fn mul_sum(&mut self, a: &Block, b: &Block) {
         let [a1, a0] = from_block(a);
         let [b1, b0] = from_block(b);
-        // println!("a1: {:02X?}", a1);
-        // println!("a0: {:02X?}", a0);
-        // println!("b1: {:02X?}", b1);
-        // println!("b0: {:02X?}", b0);
 
         let a2 = a1 ^ a0;
         let b2 = b1 ^ b0;

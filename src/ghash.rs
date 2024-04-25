@@ -50,12 +50,6 @@ impl ParBlocksSizeUser for GHash { type ParBlocksSize = U1; }
 
 impl UhfBackend for GHash {
     fn proc_block(&mut self, x: &Block) {
-        println!("x: {:02X?}", Element::from(x));
-        println!("s: {:02X?}", self.s);
-        println!("h: {:02X?}", self.h);
-        
-        println!("s ^ x: {:02X?}", self.s + Element::from(x));
-        println!("(s ^ x) * h: {:02X?}\n", (self.s + Element::from(x)) * self.h);
         self.s = (self.s + Element::from(x)) * self.h;
     }
 }
